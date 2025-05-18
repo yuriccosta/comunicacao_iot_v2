@@ -10,12 +10,16 @@
 #include "lwip/tcp.h"            // Lightweight IP stack - fornece funções e estruturas para trabalhar com o protocolo TCP
 #include "lwip/netif.h"          // Lightweight IP stack - fornece funções e estruturas para trabalhar com interfaces de rede (netif)
 
+
+#include "hardware/i2c.h"
+#include "ssd1306.h"
+#include "font.h"
 #include <hardware/pio.h>           
 #include "hardware/clocks.h"        
 #include "hardware/gpio.h"
 #include "hardware/pwm.h"
 #include "animacao_matriz.pio.h" // Biblioteca PIO para controle de LEDs WS2818B
-#include "credenciais_wifi.h" // Altere o arquivo de exemplo dentro do lib para suas credenciais
+#include "credenciais_wifi.h" // Altere o arquivo de exemplo dentro do lib para suas credenciais e retire example do nome
 
 
 // Definição dos pinos dos LEDs
@@ -29,6 +33,11 @@
 #define JOY_X 27 // Joystick está de lado em relação ao que foi dito no pdf
 #define JOY_Y 26
 #define max_value_joy 4065.0 // (4081 - 16) que são os valores extremos máximos lidos pelo meu joystick
+
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
+#define endereco 0x3C
 
 // Declaração de variáveis globais
 PIO pio;
@@ -46,7 +55,7 @@ volatile int16_t temp_atual; // Temperatura atual
 uint umid_min =  30; // Umidade mínima
 uint umid_max =  70; // Umidade máxima
 volatile uint16_t umid_atual; // Umidade atual
-
+volatile uint16_t alarm_time = 10000; // Tempo de ativação do alarme
 
 // Estrutura para armazenar mensagens
 typedef struct {
@@ -189,6 +198,22 @@ int main()
 
     stdio_init_all();
 
+    // I2C Initialisation. Using it at 400Khz.
+    i2c_init(I2C_PORT, 400 * 1000);
+    ssd1306_t ssd; // Inicializa a estrutura do display
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C); // Set the GPIO pin function to I2C
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C); // Set the GPIO pin function to I2C
+    gpio_pull_up(I2C_SDA); // Pull up the data line
+    gpio_pull_up(I2C_SCL); // Pull up the clock line
+    ssd1306_init(&ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT); // Inicializa o display
+    ssd1306_config(&ssd); // Configura o display
+    ssd1306_send_data(&ssd); // Envia os dados para o display
+
+    // Limpa o display. O display inicia com todos os pixels apagados.
+    ssd1306_fill(&ssd, false);
+    ssd1306_send_data(&ssd);
+
+
 
     struct repeating_timer timer;
     timer.user_data = &msg; // Passa a variável de avisos para o timer
@@ -198,15 +223,40 @@ int main()
     // Configura um timer repetitivo para chamar a função de callback a cada 6 segundos
     add_repeating_timer_ms(6000, repeating_timer_callback, &msg, &timer);
 
-    while (true)
-    {
-        /* 
-        * Efetuar o processamento exigido pelo cyw43_driver ou pela stack TCP/IP.
-        * Este método deve ser chamado periodicamente a partir do ciclo principal 
-        * quando se utiliza um estilo de sondagem pico_cyw43_arch 
-        */
+
+    bool mostrar_nivel = false;
+    uint32_t current_time_display = 1501; // Inicializa a variável de tempo para mostrar os avisos assim que iniciar o programa
+    uint32_t last_time_display = 0; // Variável para armazenar o tempo da última mensagem no display
+    while (true){
+        if (current_time_display - last_time_display > 1500){
+            mostrar_nivel = !mostrar_nivel;
+            last_time_display = current_time_display;
+        
+            if (mostrar_nivel){ 
+                // Atualiza o conteúdo do display com animações
+                ssd1306_fill(&ssd, true); // Limpa o display
+                ssd1306_rect(&ssd, 3, 3, 122, 58, false, true); // Desenha um retângulo
+                ssd1306_draw_string(&ssd, "Temperatura", 8, 10); // Desenha uma string
+                ssd1306_draw_string(&ssd, msg.nivel_temp, 8, 20); // Desenha uma string
+                ssd1306_line(&ssd, 0, 32, 127, 32, true); // Desenha uma linha divisória no meio da tela
+                ssd1306_draw_string(&ssd, "Umidade", 8, 40); // Desenha uma string
+                ssd1306_draw_string(&ssd, msg.nivel_umid, 8, 50); // Desenha uma strin
+                ssd1306_send_data(&ssd); // Atualiza o display
+            } else{
+                // Atualiza o conteúdo do display com animações
+                ssd1306_fill(&ssd, true); // Limpa o display
+                ssd1306_rect(&ssd, 3, 3, 122, 58, false, true); // Desenha um retângulo
+                ssd1306_draw_string(&ssd, "Temperatura", 8, 10); // Desenha uma string
+                ssd1306_draw_string(&ssd, msg.string_temp_atual, 8, 20); // Desenha uma string
+                ssd1306_line(&ssd, 0, 32, 127, 32, true); // Desenha uma linha divisória no meio da tela
+                ssd1306_draw_string(&ssd, "Umidade", 8, 40); // Desenha uma string
+                ssd1306_draw_string(&ssd, msg.string_umid_atual, 8, 50); // Desenha uma string
+                ssd1306_send_data(&ssd); // Atualiza o display
+            }
+        }
+        current_time_display = to_ms_since_boot(get_absolute_time());
+
         cyw43_arch_poll(); // Necessário para manter o Wi-Fi ativo
-        sleep_ms(100);      // Reduz o uso da CPU
     }
 
     //Desligar a arquitetura CYW43.
@@ -326,7 +376,7 @@ bool repeating_timer_callback(struct repeating_timer *timer) {
     }
 
     // Verifica se a temperatura ou umidade estão fora do intervalo por mais de 10 segundos
-    if (current_time_normal - last_time_temp_normal > 10000 || current_time_normal - last_time_umid_normal > 10000){
+    if (current_time_normal - last_time_temp_normal > alarm_time|| current_time_normal - last_time_umid_normal > alarm_time){
         // Ativa o buzzer
         iniciar_buzzer(BUZZER_A);
     } else{
@@ -349,20 +399,19 @@ void user_request(char **request){
     if (strstr(*request, "GET /update?") != NULL) {
         // Extrair parâmetros da URL
         char *params = strstr(*request, "?") + 1; // Pega tudo após o '?'
-        char tempMax[10], tempMin[10], umidMax[10], umidMin[10];
+        char tempMax[10], tempMin[10], umidMax[10], umidMin[10], alarmTime[10];
 
         // Extrai os parâmetros da URL
-        // Exemplo: "tempMax=30&tempMin=20&umidMax=70&umidMin=30"
+        // Exemplo: "tempMax=30&tempMin=20&umidMax=70&umidMin=30&alarmTime"
         // Lembrar que %[^&] significa "ler até o caractere '&'"
-        sscanf(params, "tempMax=%[^&]&tempMin=%[^&]&umidMax=%[^&]&umidMin=%s", tempMax, tempMin, umidMax, umidMin);
+        sscanf(params, "tempMax=%[^&]&tempMin=%[^&]&umidMax=%[^&]&umidMin=%[^&]&alarmTime=%s", tempMax, tempMin, umidMax, umidMin, alarmTime);
 
         // Atualizar as variáveis globais        // Desliga o LED
         temp_max = atoi(tempMax);
         temp_min = atoi(tempMin);
         umid_max = atoi(umidMax);
         umid_min = atoi(umidMin);
-
-        printf("Configurações atualizadas: tempMax=%d, tempMin=%d, umidMax=%d, umidMin=%d\n", temp_max, temp_min, umid_max, umid_min);
+        alarm_time = atoi(alarmTime) * 1000;
     }
 };
 
@@ -387,38 +436,55 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
     user_request(&request);
 
     // Cria a resposta HTML
-    char html[1256];
+    char html[3000];
 
     // Instruções html do webserver
     snprintf(html, sizeof(html), // Formatar uma string e armazená-la em um buffer de caracteres
              "HTTP/1.1 200 OK\r\n"
              "Content-Type: text/html\r\n"
              "\r\n"
-             "<!DOCTYPE html>\n"
-            "<html lang=\"pt-br\">\n"
-            "<head>\n"
-            "<meta charset=\"UTF-8\">\n"
-            "<title>Controle de Estufa</title>\n"
-            "</head>\n"
-            "<body>\n"
-            "<h1>Monitoramento IoT</h1>\n"
-            "<form action=\"/update\" method=\"GET\">\n"
-            "<label for=\"tempMax\">Temperatura Máxima (°C):</label>\n"
-            "<input type=\"number\" id=\"tempMax\" name=\"tempMax\" value=\"%d\"><br>\n"
-            "<label for=\"tempMin\">Temperatura Mínima (°C):</label>\n"
-            "<input type=\"number\" id=\"tempMin\" name=\"tempMin\" value=\"%d\"><br>\n"
-            "<label for=\"umidMax\">Umidade Máxima (%%):</label>\n"
-            "<input type=\"number\" id=\"umidMax\" name=\"umidMax\" value=\"%d\"><br>\n"
-            "<label for=\"umidMin\">Umidade Mínima (%%):</label>\n"
-            "<input type=\"number\" id=\"umidMin\" name=\"umidMin\" value=\"%d\"><br>\n"
-            "<button type=\"submit\">Atualizar</button>\n"
-            "</form>\n"
-            "<h2>Leituras Atuais</h2>\n"
-            "<p>Temperatura: <span id=\"currentTemp\">%s</span>(<span id=\"tempStatus\">%s</span>)</p>\n"
-            "<p>Umidade: <span id=\"currentUmid\">%s</span>(<span id=\"umidStatus\">%s</span>)</p>\n"
-            "</body>\n"
-            "</html>\n",
-             temp_max, temp_min, umid_max, umid_min, msg.string_temp_atual, msg.nivel_temp, msg.string_umid_atual, msg.nivel_umid);
+             "<!DOCTYPE html>"
+            "<html lang=\"pt-br\">"
+            "<head>"
+            "<meta charset=\"UTF-8\">"
+            "<title>Controle de Estufa</title>"
+            "<style>"
+            "body{font-family:sans-serif;background:#f4f6fb;color:#222;margin:0;padding:0;}"
+            ".container{max-width:400px;margin:30px auto;background:#fff;padding:18px 22px 16px 22px;border-radius:8px;box-shadow:0 2px 8px #0001;}"
+            "h1{font-size:1.4em;margin:0 0 18px 0;text-align:center;}"
+            "form{margin-bottom:16px;}"
+            "label{display:block;margin:10px 0 2px 0;font-size:1em;}"
+            "input[type=number]{width:100%%;padding:4px 6px;margin-bottom:8px;border:1px solid #bbb;border-radius:3px;}"
+            "button{display:block;width:100%%;padding:7px 0;background:#2a7be4;color:#fff;border:none;border-radius:4px;font-size:1em;cursor:pointer;transition:.2s;}"
+            "button:hover{background:#185ca7;}"
+            "h2{font-size:1.1em;margin:18px 0 8px 0;}"
+            "p{margin:6px 0;}"
+            "span{font-weight:bold;}"
+            "</style>"
+            "</head>"
+            "<body>"
+            "<div class=\"container\">"
+            "<h1>Monitoramento IoT</h1>"
+            "<form action=\"/update\" method=\"GET\">"
+            "<label for=\"tempMax\">Temperatura Máxima (°C):</label>"
+            "<input type=\"number\" id=\"tempMax\" name=\"tempMax\" value=\"%d\">"
+            "<label for=\"tempMin\">Temperatura Mínima (°C):</label>"
+            "<input type=\"number\" id=\"tempMin\" name=\"tempMin\" value=\"%d\">"
+            "<label for=\"umidMax\">Umidade Máxima (%%):</label>"
+            "<input type=\"number\" id=\"umidMax\" name=\"umidMax\" value=\"%d\">"
+            "<label for=\"umidMin\">Umidade Mínima (%%):</label>"
+            "<input type=\"number\" id=\"umidMin\" name=\"umidMin\" value=\"%d\">"
+            "<label for=\"alarmTime\">Tempo de Ativação do Alarme (s):</label>"
+            "<input type=\"number\" id=\"alarmTime\" name=\"alarmTime\" value=\"%d\">"
+            "<button type=\"submit\">Atualizar</button>"
+            "</form>"
+            "<h2>Leituras Atuais</h2>"
+            "<p>Temperatura: <span id=\"currentTemp\">%s</span> (<span id=\"tempStatus\">%s</span>)</p>"
+            "<p>Umidade: <span id=\"currentUmid\">%s</span> (<span id=\"umidStatus\">%s</span>)</p>"
+            "</div>"
+            "</body>"
+            "</html>",
+             temp_max, temp_min, umid_max, umid_min, alarm_time, msg.string_temp_atual, msg.nivel_temp, msg.string_umid_atual, msg.nivel_umid);
 
     // Escreve dados para envio (mas não os envia imediatamente).
     tcp_write(tpcb, html, strlen(html), TCP_WRITE_FLAG_COPY);

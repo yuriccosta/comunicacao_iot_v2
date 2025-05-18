@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(controle_estufa controle_estufa.c )
+add_executable(controle_estufa controle_estufa.c lib/ssd1306.c)
 
 # Generate PIO header
 pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/lib/animacao_matriz.pio)
@@ -55,6 +55,7 @@ target_link_libraries(controle_estufa
         hardware_pio
         hardware_clocks
         hardware_pwm
+        hardware_i2c
         pico_cyw43_arch_lwip_threadsafe_background
 )
 
