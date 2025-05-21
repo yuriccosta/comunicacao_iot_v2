@@ -402,7 +402,7 @@ void user_request(char **request){
         char tempMax[10], tempMin[10], umidMax[10], umidMin[10], alarmTime[10];
 
         // Extrai os parâmetros da URL
-        // Exemplo: "tempMax=30&tempMin=20&umidMax=70&umidMin=30&alarmTime"
+        // Exemplo: "tempMax=30&tempMin=20&umidMax=70&umidMin=30&alarmTime=10"
         // Lembrar que %[^&] significa "ler até o caractere '&'"
         sscanf(params, "tempMax=%[^&]&tempMin=%[^&]&umidMax=%[^&]&umidMin=%[^&]&alarmTime=%s", tempMax, tempMin, umidMax, umidMin, alarmTime);
 
