@@ -229,7 +229,7 @@ int main()
     uint32_t last_time_display = 0; // Variável para armazenar o tempo da última mensagem no display
     while (true){
         if (current_time_display - last_time_display > 1500){
-            mostrar_nivel = !mostrar_nivel;
+            mostrar_nivel = !mostrar_nivel; // Alterna entre mostrar o nível e a temperatura/umidade atual
             last_time_display = current_time_display;
         
             if (mostrar_nivel){ 
@@ -484,7 +484,7 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
             "</div>"
             "</body>"
             "</html>",
-             temp_max, temp_min, umid_max, umid_min, alarm_time, msg.string_temp_atual, msg.nivel_temp, msg.string_umid_atual, msg.nivel_umid);
+             temp_max, temp_min, umid_max, umid_min, alarm_time/1000, msg.string_temp_atual, msg.nivel_temp, msg.string_umid_atual, msg.nivel_umid);
 
     // Escreve dados para envio (mas não os envia imediatamente).
     tcp_write(tpcb, html, strlen(html), TCP_WRITE_FLAG_COPY);
